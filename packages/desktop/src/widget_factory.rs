@@ -5,6 +5,7 @@ use std::{
     atomic::{AtomicU32, Ordering},
     Arc,
   },
+  env,
 };
 
 use anyhow::Context;
@@ -18,6 +19,8 @@ use tokio::{
   task,
 };
 use tracing::{error, info};
+use gtk::prelude::{ContainerExt, GtkWindowExt, WidgetExt};
+use gtk_layer_shell::{Edge, LayerShell};
 
 use crate::{
   common::{PathExt, WindowExt},
@@ -256,6 +259,41 @@ impl WidgetFactory {
 
       self.register_window_events(&window, widget_id);
       self.open_tx.send(state)?;
+
+      // On Wayland, we need to use gtk-layer-shell for reserving space at the top.
+      #[cfg(target_os = "linux")]
+      {
+        let session_type = env::var("XDG_SESSION_TYPE");
+
+        if session_type.unwrap() == "wayland" {
+          window.hide().unwrap();
+
+          let gtk_window = gtk::ApplicationWindow::new(
+            &window.gtk_window().unwrap().application().unwrap(),
+          );
+
+          gtk_window.set_app_paintable(true);
+
+          let vbox = window.default_vbox().unwrap();
+          window.gtk_window().unwrap().remove(&vbox);
+          gtk_window.add(&vbox);
+
+          gtk_window.init_layer_shell();
+
+          gtk_window.set_layer(gtk_layer_shell::Layer::Top);
+
+          gtk_window.auto_exclusive_zone_enable();
+
+          gtk_window.set_anchor(Edge::Top, true);
+          gtk_window.set_anchor(Edge::Left, true);
+          gtk_window.set_anchor(Edge::Right, true);
+          gtk_window.set_anchor(Edge::Bottom, false);
+
+          gtk_window.set_size_request(size.width, size.height);
+
+          gtk_window.show_all();
+        }
+      }
     }
 
     Ok(())
